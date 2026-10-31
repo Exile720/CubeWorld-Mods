@@ -1,0 +1,18 @@
+{
+  "scope": "selected map target arrow only; original shop names, guide, top navigation, coordinates and storage unchanged",
+  "version": "0.3.3",
+  "created": "2026-10-23T14:01:09.4509112+08:00",
+  "waypointSha256": "2FC234E28F95AE834EDC3DE8BD5EF10AC808FFA9A2FB1B813E8ADF1DB3C495A2",
+  "stage": "experimental copy installed; in-game validation pending",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "checks": {
+    "visual": "single existing shop name with selection arrow beneath; no additional target nameplate",
+    "inGame": "pending",
+    "previews": [
+      "1280x800",
+      "800x480"
+    ],
+    "build": "Release success"
+  },
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF"
+}

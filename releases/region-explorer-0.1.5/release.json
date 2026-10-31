@@ -1,0 +1,14 @@
+{
+  "version": "0.1.5",
+  "id": "local.cubeworld.region_explorer",
+  "managerId": "RegionExplorer",
+  "regionExplorerSha256": "F2C4A99F34E30631E2A9CB9A9A2DA2A1C3CAD4D107D7C1CBE36FB2DCE037D7A9",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "optionalNavigationVersion": "0.3.7",
+  "bossClassScope": "resident mission-type-5 leader spawns; exact spawn IDs and live task; limited pure prediction; unknown otherwise",
+  "gameRngChanged": false,
+  "built": "2026-10-25T15:02:21.0915606+08:00",
+  "gameLaunched": false,
+  "rngRuntimeSha256": "B30160E759115E24425B9BCDF606EF6EBCE4657487525EDE7F1AC40B90FF7E49"
+}

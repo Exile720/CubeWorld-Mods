@@ -1,0 +1,14 @@
+{
+  "nightStartHour": 20,
+  "version": "0.1.1",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "managerId": "MapLight",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "mapLightSha256": "A3E53D0F35D537C0A76719D845D2AF80BE3D819054252FC507BDCEE4E0C27B03",
+  "gameLaunched": false,
+  "dayStartHour": 6,
+  "built": "2026-10-24T19:51:39.1577432+08:00",
+  "id": "local.cubeworld.map_light",
+  "daytimeNative": true,
+  "closedMapSkipsSession": true
+}

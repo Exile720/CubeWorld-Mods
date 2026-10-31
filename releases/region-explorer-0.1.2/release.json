@@ -1,0 +1,12 @@
+{
+  "difficulty": "native area-level curve / white cyan red",
+  "managerId": "RegionExplorer",
+  "gameLaunched": false,
+  "regionExplorerSha256": "130A505CD8AA29FFC3D6B201680DA412501FFA69E340CC88C8154568D45CB789",
+  "optionalNavigationVersion": "0.3.7",
+  "built": "2026-10-24T23:39:29.8748195+08:00",
+  "version": "0.1.2",
+  "id": "local.cubeworld.region_explorer",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31"
+}

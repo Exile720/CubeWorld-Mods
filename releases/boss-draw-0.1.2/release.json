@@ -1,0 +1,12 @@
+{
+  "version": "0.1.2",
+  "manifestId": "local.cubeworld.boss-draw",
+  "bossDrawSha256": "D74988D0A4583F599D5B777CCFC91E8B1E0F1EA96797EECA0A5BAE33B37BD4FA",
+  "compensationToolSha256": "EA5BF8E3486563BFE88B3B8F70823914C87FFA6BE81080855E8257F6899803C5",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "managerRebuildRequired": false,
+  "gameplayVerified": false,
+  "dataFormat": "CWBOSS01",
+  "change": "Compensation labels; no change to normal drops, draw pool, pity or ledger codec."
+}

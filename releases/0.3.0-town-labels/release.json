@@ -1,0 +1,18 @@
+{
+  "created": "2026-10-23T10:56:12.4431788+08:00",
+  "checks": {
+    "town": 28,
+    "sidebarHitTests": "passed",
+    "navigation": 51,
+    "liveTownValidation": "pending",
+    "previewSizes": [
+      "1280x800",
+      "800x560"
+    ]
+  },
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "version": "0.3.0",
+  "stage": "candidate, not installed",
+  "waypointSha256": "548FE05086D4D0067F0FBFA7C42DC6C2CAC070AEEB792EDB318B91E0069687F5",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF"
+}

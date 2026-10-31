@@ -1,0 +1,15 @@
+{
+  "snapshotDate": "2026-10-31",
+  "includesWorkingTreeChanges": true,
+  "dependencies": {
+    "Qube-Loader": "4c3dad5a4665ffcc40117aef7fe6da6fdea61ca9",
+    "Dear-ImGui": "8936b58fe26e8c3da834b8f60b06511d537b4c63",
+    "MinHook": "c3fcafdc10146beb5919319d0683e44e3c30d537"
+  },
+  "qubeLocalChanges": [
+    "modloader/src/hooks/d3d9_hook.cpp",
+    "modloader/src/overlay/overlay.cpp"
+  ],
+  "scope": "development source; no game, saves, captured sessions or compiled binaries",
+  "privacy": "personal session records omitted; machine paths replaced with examples"
+}

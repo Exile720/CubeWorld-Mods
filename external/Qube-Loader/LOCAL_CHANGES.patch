@@ -1,0 +1,70 @@
+diff --git a/modloader/src/hooks/d3d9_hook.cpp b/modloader/src/hooks/d3d9_hook.cpp
+index eb08367..3eaf7a2 100644
+--- a/modloader/src/hooks/d3d9_hook.cpp
++++ b/modloader/src/hooks/d3d9_hook.cpp
+@@ -188,7 +188,8 @@ namespace hooks::d3d9
+             }
+ 
+             HWND probeWnd =
+-                CreateWindowExA(0, kProbeClass, kProbeClass, WS_OVERLAPPEDWINDOW, 0, 0, kProbeWindowSize,
++                // No title/frame: at high DPI a 64px decorated window can have zero client height.
++                CreateWindowExA(0, kProbeClass, kProbeClass, WS_POPUP, 0, 0, kProbeWindowSize,
+                                 kProbeWindowSize, nullptr, nullptr, self, nullptr);
+             if (probeWnd == nullptr)
+             {
+@@ -219,6 +220,9 @@ namespace hooks::d3d9
+                      static_cast<unsigned>(adapter.DeviceId));
+ 
+             D3DPRESENT_PARAMETERS pp = {};
++            // Explicit dimensions avoid deriving a zero back buffer from a tiny client area.
++            pp.BackBufferWidth = kProbeWindowSize;
++            pp.BackBufferHeight = kProbeWindowSize;
+             pp.Windowed = TRUE;
+             pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+             pp.hDeviceWindow = probeWnd;
+@@ -329,4 +333,4 @@ namespace hooks::d3d9
+     {
+         return hooks::window::window();
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/modloader/src/overlay/overlay.cpp b/modloader/src/overlay/overlay.cpp
+index 17b6203..4b64b93 100644
+--- a/modloader/src/overlay/overlay.cpp
++++ b/modloader/src/overlay/overlay.cpp
+@@ -15,6 +15,7 @@
+ #include <d3d9.h>
+ 
+ #include <atomic>
++#include <cstdio>
+ #include <mutex>
+ #include <vector>
+ 
+@@ -222,6 +223,26 @@ namespace modloader::overlay
+             // backend sets its shape from WM_SETCURSOR); a second ImGui software cursor would double it.
+             io.MouseDrawCursor = false;
+ 
++            // Local navigation UI: reuse this installed game's own Chinese font, without bundling it.
++            ImFontConfig nativeFont = {};
++            nativeFont.PixelSnapH = true;
++            ImFont* navigationFont = nullptr;
++            if (GetFileAttributesA("resource1.dat") != INVALID_FILE_ATTRIBUTES)
++                navigationFont = io.Fonts->AddFontFromFileTTF("resource1.dat", 20.0f, &nativeFont,
++                                                           io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
++            if (navigationFont != nullptr)
++                LOGC(Info, kCategory, "navigation font: installed game resource1.dat");
++            // Fallback only when the installed resource is unavailable.
++            char winDir[MAX_PATH] = {};
++            char fontPath[MAX_PATH] = {};
++            if (navigationFont == nullptr && GetWindowsDirectoryA(winDir, MAX_PATH) > 0)
++            {
++                std::snprintf(fontPath, sizeof(fontPath), "%s\\Fonts\\msyh.ttc", winDir);
++                if (GetFileAttributesA(fontPath) != INVALID_FILE_ATTRIBUTES)
++                    io.Fonts->AddFontFromFileTTF(fontPath, 20.0f, nullptr,
++                                               io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
++            }
++
+             if (!ImGui_ImplWin32_Init(hwnd))
+             {
+                 LOGC(Error, kCategory, "ImGui_ImplWin32_Init failed");

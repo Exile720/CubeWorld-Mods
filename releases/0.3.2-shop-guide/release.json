@@ -1,0 +1,20 @@
+{
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "checks": {
+    "preview": [
+      "1280x800",
+      "800x560",
+      "800x480",
+      "empty"
+    ],
+    "sidebarHit": "smithy row and empty header passed",
+    "textWidths": "all 8 types passed",
+    "build": "Release success"
+  },
+  "version": "0.3.2",
+  "waypointSha256": "58BFB004EC964326A09F2DD140C4A7B0BAA75B891916AECA45F2055A7454F65C",
+  "scope": "right sidebar Alpha shop services and common goods; map-open only; no changes to destination or town cache formats",
+  "stage": "installed in Experiment; in-game UI verification pending",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "created": "2026-10-23T11:33:34.4751263+08:00"
+}

@@ -1,0 +1,12 @@
+{
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "bossDrawSha256": "5E85801BFD2CACCA3E014CC8931B21719B588152461A75BDDF3B41716690A9F6",
+  "version": "0.1.1",
+  "fix": "ASLR-aware exact SEH operand validation",
+  "manifestId": "local.cubeworld.boss-draw",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "managerSha256": "6544D87E2A76FDE01F182CA72B72D939D2A96E060C538E48993967FC63EB68DE",
+  "gameplayVerified": false,
+  "startupVerified": true,
+  "f9UserConfirmed": true
+}

@@ -1,0 +1,5 @@
+# Preserve generated documents, images and binary replay fixtures byte-for-byte.
+*.pdf binary
+*.png binary
+*.ico binary
+*.bin binary

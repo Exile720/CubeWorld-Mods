@@ -1,0 +1,11 @@
+{
+  "version": "0.1.6",
+  "manifestId": "local.cubeworld.boss-draw",
+  "bossDrawSha256": "996AB98F40459E1DAF8F773DBFF25E1209049808CCE1CA6362CAFA82AFB198EB",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "managerRebuildRequired": false,
+  "gameplayVerified": false,
+  "dataFormat": "CWBOSS01",
+  "change": "Queue scoped death snapshots across update/render threads; retain original loot, manual reveal/claim and saved data; add bounded boss rejection diagnostics."
+}

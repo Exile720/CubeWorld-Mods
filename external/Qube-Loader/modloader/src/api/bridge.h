@@ -1,0 +1,256 @@
+#pragma once
+// Shared internals for the api bridge: each api/<domain>.cpp exposes one fillX(CubeApi&).
+#include "loader/core/owner_name.h"
+#include "loader/core/writeguard.h"
+#include "core/log.h"
+#include "cube_sdk.h"
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+namespace modloader::api
+{
+
+    constexpr char kApiCategory[] = "api"; // every mod to loader call is logged here
+
+    // Copies text into out (capped, always null terminated) and returns the copied length.
+    inline int32_t copyOut(const std::string& text, char* out, int32_t size)
+    {
+        const int32_t copyLen =
+            text.size() < static_cast<size_t>(size - 1) ? static_cast<int32_t>(text.size()) : size - 1;
+        std::memcpy(out, text.data(), static_cast<size_t>(copyLen));
+        out[copyLen] = '\0';
+        return copyLen;
+    }
+
+    // Recovers the calling mod's name from its CubeApi (for the per call log line).
+    inline const char* modName(const CubeApi* api)
+    {
+        return modloader::ownerName(api);
+    }
+
+    inline logger::Level mapLevel(CubeLogLevel level)
+    {
+        switch (level)
+        {
+            case CUBE_LOG_TRACE:
+                return logger::Level::Trace;
+            case CUBE_LOG_DEBUG:
+                return logger::Level::Debug;
+            case CUBE_LOG_INFO:
+                return logger::Level::Info;
+            case CUBE_LOG_WARN:
+                return logger::Level::Warn;
+            case CUBE_LOG_ERROR:
+            default:
+                return logger::Level::Error;
+        }
+    }
+
+    inline int32_t okInt(bool ok)
+    {
+        return ok ? 1 : 0;
+    }
+
+    // "reader get" reducer; `absent` is the log word on read failure ("unavailable"/"none").
+    // `addr` (optional) names the struct's live base field so a successful read logs the resolved
+    // memory address alongside "ok", the single most useful datum for a mod dev inspecting a read.
+    template <typename T>
+    int32_t bridgeGet(const CubeApi* api, T* out, bool (*read)(T&), const char* label, const char* absent,
+                      uint32_t T::* addr = nullptr)
+    {
+        if (!out)
+            return 0;
+        T value = {};
+        value.structSize = sizeof(T);
+        const bool ok = read(value);
+        if (ok && addr)
+            LOGC(Trace, kApiCategory, "'%s' %s -> ok (0x%08X)", modName(api), label, value.*addr);
+        else
+            LOGC(Trace, kApiCategory, "'%s' %s -> %s", modName(api), label, ok ? "ok" : absent);
+        if (!ok)
+            return 0;
+        *out = value;
+        return 1;
+    }
+
+    // "list" reducer: log the max and actual count, then return the count.
+    inline int32_t bridgeList(const CubeApi* api, const char* label, int32_t maxCount, int32_t count)
+    {
+        LOGC(Trace, kApiCategory, "'%s' %s(max %d) -> %d", modName(api), label, maxCount, count);
+        return count;
+    }
+
+    // Same, for lists of live objects: also prints each entry's base address (capped) so a mod dev
+    // can immediately follow up with a raw read on any returned handle. `addr` names the base field.
+    template <typename T>
+    int32_t bridgeList(const CubeApi* api, const char* label, const T* out, int32_t maxCount, int32_t count,
+                       uint32_t T::* addr)
+    {
+        constexpr int32_t kMaxLogged = 16; // cap so a full inventory/creature sweep cannot flood one line
+        char buf[kMaxLogged * 11 + 16] = {};
+        int written = 0;
+        const int32_t shown = (count < kMaxLogged) ? count : kMaxLogged;
+        for (int32_t i = 0; i < shown && written >= 0 && written < static_cast<int>(sizeof(buf)); ++i)
+        {
+            const int n =
+                std::snprintf(buf + written, sizeof(buf) - written, "%s0x%08X", i ? " " : "", out[i].*addr);
+            if (n < 0)
+                break;
+            written += n;
+        }
+        if (count > shown && written >= 0 && written < static_cast<int>(sizeof(buf)))
+            std::snprintf(buf + written, sizeof(buf) - written, " +%d more", count - shown);
+        LOGC(Trace, kApiCategory, "'%s' %s(max %d) -> %d [%s]", modName(api), label, maxCount, count, buf);
+        return count;
+    }
+
+    // Maps a single CubeModCapability bit to its name for the "capability not declared" log line.
+    inline const char* capabilityName(uint32_t bit)
+    {
+        switch (bit)
+        {
+            case CUBE_CAP_RAW_MEM:
+                return "RawMem";
+            case CUBE_CAP_RAW_HOOKS:
+                return "RawHooks";
+            case CUBE_CAP_WRITES:
+                return "Writes";
+            case CUBE_CAP_OVERLAY:
+                return "Overlay";
+            case CUBE_CAP_ASSETS:
+                return "Assets";
+            default:
+                return "?";
+        }
+    }
+
+    // Call time capability gate. A mod that declares no capabilities (0) is unrestricted (the trusted
+    // default); otherwise a call whose `required` bit is absent is denied (returns false, caller
+    // returns its failure value). Denials log one WARN per (mod, capability) via ModContext.warnedCaps
+    // so a per frame denied call cannot flood the log.
+    inline bool capabilityGate(const CubeApi* api, uint32_t required, const char* label)
+    {
+        const uint32_t caps = ownerCapabilities(api);
+        if (caps == 0 || (caps & required) != 0)
+            return true;
+        if (ownerWarnOnce(api, required))
+            LOGC(Warn, kApiCategory,
+                 "'%s' blocked from %s: capability '%s' not declared (add it to setCapabilities)",
+                 modName(api), label, capabilityName(required));
+        return false;
+    }
+
+    // Setter reducers, one per argument shape so the log format matches. Every game state write is
+    // gated on the Writes capability here, so a mod that declares capabilities but not Writes is denied.
+    inline int32_t bridgeSetAddrField(const CubeApi* api, const char* label,
+                                      bool (*set)(uint32_t, int32_t, double), uint32_t address, int32_t field,
+                                      double value)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(address, field, value);
+        LOGC(Debug, kApiCategory, "'%s' %s(0x%08X, %d, %.3f) -> %s", modName(api), label, address, field,
+             value, ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetIndexed(const CubeApi* api, const char* label, bool (*set)(int32_t, double),
+                                    int32_t field, double value)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(field, value);
+        LOGC(Debug, kApiCategory, "'%s' %s(%d, %.3f) -> %s", modName(api), label, field, value,
+             ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetPair(const CubeApi* api, const char* label, bool (*set)(int32_t, int32_t),
+                                 int32_t first, int32_t second)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(first, second);
+        LOGC(Debug, kApiCategory, "'%s' %s(%d, %d) -> %s", modName(api), label, first, second,
+             ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetVec3(const CubeApi* api, const char* label, bool (*set)(float, float, float),
+                                 float x, float y, float z)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(x, y, z);
+        LOGC(Debug, kApiCategory, "'%s' %s(%.1f, %.1f, %.1f) -> %s", modName(api), label, x, y, z,
+             ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetAddrVec3(const CubeApi* api, const char* label,
+                                     bool (*set)(uint32_t, float, float, float), uint32_t address, float x,
+                                     float y, float z)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(address, x, y, z);
+        LOGC(Debug, kApiCategory, "'%s' %s(0x%08X, %.1f, %.1f, %.1f) -> %s", modName(api), label, address, x,
+             y, z, ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetName(const CubeApi* api, const char* label, bool (*set)(const char*),
+                                 const char* name)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(name);
+        LOGC(Debug, kApiCategory, "'%s' %s(%s) -> %s", modName(api), label, name ? name : "(null)",
+             ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    inline int32_t bridgeSetAddrName(const CubeApi* api, const char* label,
+                                     bool (*set)(uint32_t, const char*), uint32_t address, const char* name)
+    {
+        if (!capabilityGate(api, CUBE_CAP_WRITES, label))
+            return 0;
+        writeguard::Scope scope(api);
+        const bool ok = set(address, name);
+        LOGC(Debug, kApiCategory, "'%s' %s(0x%08X, %s) -> %s", modName(api), label, address,
+             name ? name : "(null)", ok ? "ok" : "fail");
+        return okInt(ok);
+    }
+
+    void fillSystem(CubeApi& api);
+    void fillPlayer(CubeApi& api);
+    void fillCombat(CubeApi& api);
+    void fillItems(CubeApi& api);
+    void fillStatus(CubeApi& api);
+    void fillWorld(CubeApi& api);
+    void fillCreatures(CubeApi& api);
+    void fillCompanion(CubeApi& api);
+    void fillView(CubeApi& api);
+    void fillSession(CubeApi& api);
+    void fillCatalog(CubeApi& api);
+    void fillInput(CubeApi& api);
+    void fillSelection(CubeApi& api);
+    void fillPickup(CubeApi& api);
+    void fillHooks(CubeApi& api);
+    void fillConfig(CubeApi& api);
+    void fillStorage(CubeApi& api);
+    void fillServices(CubeApi& api);
+    void fillLocale(CubeApi& api);
+    void fillAssets(CubeApi& api);
+    void fillOverlay(CubeApi& api);
+    void fillChat(CubeApi& api);
+    void fillAppearance(CubeApi& api);
+}

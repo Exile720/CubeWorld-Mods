@@ -1,0 +1,11 @@
+{
+  "version": "0.1.4",
+  "manifestId": "local.cubeworld.boss-draw",
+  "bossDrawSha256": "7F363B7503A86898514DEC70C26C6CFAA0CF1AFF9D19C9FF6CC3D9BD37215C46",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "managerRebuildRequired": false,
+  "gameplayVerified": false,
+  "dataFormat": "CWBOSS01",
+  "change": "Full-card quality color, continuous eight-second rotation and stationary surrounding item details."
+}

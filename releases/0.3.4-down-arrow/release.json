@@ -1,0 +1,19 @@
+{
+  "version": "0.3.4",
+  "created": "2026-10-23T22:11:48.6525967+08:00",
+  "stage": "experimental copy installed; in-game validation pending",
+  "waypointSha256": "6EDF338D0B5A71C4A403E647490A75136B173363A46D2F2B36CED5E316872B15",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "scope": "downward arrow above target; thicker shaft; moderate map scale; one existing nameplate avoids arrow",
+  "checks": {
+    "town": "32 PASS",
+    "previews": [
+      "1280x800",
+      "800x480"
+    ],
+    "visual": "downward arrow and one unobstructed original label",
+    "build": "Win32 Release success",
+    "inGame": "pending"
+  }
+}

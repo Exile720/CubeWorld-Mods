@@ -1,0 +1,11 @@
+{
+  "built": "2026-10-24T16:43:58.5345869+08:00",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "optionalNavigationVersion": "0.3.6",
+  "version": "0.1.0",
+  "gameLaunched": false,
+  "regionExplorerSha256": "F647A316AD0D69981143BA41765D30A1F4ABDE7A763DCD24D97A1E35C021C7F6",
+  "managerId": "RegionExplorer",
+  "id": "local.cubeworld.region_explorer"
+}

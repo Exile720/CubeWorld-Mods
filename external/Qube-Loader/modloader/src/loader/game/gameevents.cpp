@@ -1,0 +1,740 @@
+#include "loader/game/gameevents.h"
+#include "loader/core/events.h"
+#include "hooks/d3d9_hook.h"
+#include "core/log.h"
+#include "core/mem.h"
+#include "game/player.h"
+#include "game/gamecontroller.h"
+#include "game/actionlock.h"
+#include "game/combat.h"
+#include "game/world.h"
+#include "game/session.h"
+#include "game/status.h"
+#include "game/items.h"
+#include "game/creatures.h"
+#include "game/framecache.h"
+#include "game/selection.h"
+#include "game/pickup.h"
+#include "game/chat.h"
+#include "game/offsets.h"
+#include "game/diag.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
+
+namespace modloader::gameevents
+{
+    namespace
+    {
+
+        constexpr char kCategory[] = "gameevents";
+        // Live calibration channel: logs the raw action id whenever it changes so a test run reveals
+        // the exact attack/cast ids each weapon produces (the id partition is weapon/class dependent).
+        constexpr char kActionCategory[] = "action";
+
+        uint32_t g_frameIndex = 0; // render thread only
+
+        // Snapshot of last frame's watched values, diffed each frame to detect edges. Render thread only.
+        struct PrevGameState
+        {
+            bool valid = false;
+            bool hadArea = false;
+            bool inWorld = false;
+            int32_t action = 0;
+            int32_t lastActionId = -1;
+            int32_t alive = 1;
+            int32_t movement = 0;
+            uint32_t target = 0;
+            int32_t coins = 0;
+            game::actionlock::Cause lockCause = game::actionlock::Cause::None;
+            int32_t knockedDown = 0;
+            uint64_t companionId = 0;
+            uint32_t companionAddress = 0;
+            int32_t zoneX = 0;
+            int32_t zoneY = 0;
+            int32_t level = 0;
+            bool menuOpen = false;
+            bool hadTime = false;
+            int32_t isDay = 0;
+            uint64_t aimId = 0;
+            bool hadBuffs = false;
+            int32_t buffCount = 0;
+            uint8_t buffTypes[CUBE_BUFFS_MAX] = {};
+            bool hadEquip = false;
+            uint32_t equipSig[CUBE_EQUIP_SLOTS] = {};
+            bool hadSkills = false;
+            int32_t skills[CUBE_SKILL_COUNT] = {};
+            bool hadCooldowns = false;
+            int32_t cdCount = 0;
+            int32_t cdIds[CUBE_ABILITIES_MAX] = {};
+            int32_t cdMs[CUBE_ABILITIES_MAX] = {};
+            bool hadChat = false;
+            uint32_t chatSig = 0;
+        };
+
+        PrevGameState g_prev; // render thread only
+
+        // Jump/land are the grounded family and airborne family edge only. Swimming and Climbing are
+        // deliberately in neither family, so entering water or a climb is a MOVEMENT_CHANGED, not a jump.
+        bool isGroundedFamily(int32_t movement)
+        {
+            return movement == CUBE_MOVE_GROUNDED || movement == CUBE_MOVE_SNEAKING;
+        }
+
+        bool isAirborneFamily(int32_t movement)
+        {
+            return movement == CUBE_MOVE_AIRBORNE || movement == CUBE_MOVE_GLIDING;
+        }
+
+        bool isAttackAction(int32_t action)
+        {
+            return action == CUBE_ACTION_ATTACKING || action == CUBE_ACTION_CASTING;
+        }
+
+        // Build a CubeEventArgs carrying the event's real payload (subject/param/param2/amount) and emit it.
+        void emitEvent(CubeEvent event, uint32_t subject, int32_t param, int32_t param2 = 0,
+                       float amount = 0.0f)
+        {
+            CubeEventArgs args = {};
+            args.structSize = sizeof(CubeEventArgs);
+            args.event = event;
+            args.subject = subject;
+            args.param = param;
+            args.param2 = param2;
+            args.amount = amount;
+            LOGC(Debug, kCategory, "emit %s: subject=0x%08X param=%d param2=%d amount=%.2f",
+                 modloader::events::eventName(event), subject, param, param2, amount);
+            modloader::events::emit(args);
+        }
+
+        constexpr uint32_t kSigMultiplier = 131u; // small odd prime for the mixing hash
+        constexpr uint32_t kSigEmpty = 0u; // signature of an absent item (empty slot)
+        constexpr uint32_t kSigNonEmpty = 1u; // fallback so a present item never reads as empty
+
+        // A stable per item signature to detect an equipment slot change without storing the item.
+        // Change detection only, not identity.
+        uint32_t itemSignature(const CubeItem& item)
+        {
+            if (!item.present)
+                return kSigEmpty;
+
+            uint32_t sig = static_cast<uint32_t>(item.type);
+            sig = sig * kSigMultiplier + static_cast<uint32_t>(item.subtype);
+            sig = sig * kSigMultiplier + static_cast<uint32_t>(item.material);
+            sig = sig * kSigMultiplier + static_cast<uint32_t>(item.level);
+            sig = sig * kSigMultiplier + static_cast<uint32_t>(item.upgradeCount);
+            sig ^= item.seed;
+
+            return sig ? sig : kSigNonEmpty;
+        }
+
+        // Emit a BUFF_GAINED carrying the effect's magnitude + remaining duration, looked up from the
+        // live buff list by type (the first match; duplicate types share one lookup, documented in the SDK).
+        void emitBuffGained(uint8_t type, const CubeBuff* live, int32_t liveN)
+        {
+            for (int32_t i = 0; i < liveN; ++i)
+            {
+                if (static_cast<uint8_t>(live[i].type) == type)
+                {
+                    emitEvent(CUBE_EVENT_BUFF_GAINED, 0, type, live[i].remainingMs, live[i].magnitude);
+                    return;
+                }
+            }
+            emitEvent(CUBE_EVENT_BUFF_GAINED, 0, type); // not found (raced out already): type only
+        }
+
+        // Emit BUFF_GAINED / BUFF_LOST for the multiset difference of two sorted type lists. `live`/`liveN`
+        // is the current unsorted buff list, so a gained buff carries its magnitude + duration.
+        void diffBuffTypes(const uint8_t* cur, int32_t curN, const uint8_t* prev, int32_t prevN,
+                           const CubeBuff* live, int32_t liveN)
+        {
+            int32_t i = 0;
+            int32_t j = 0;
+            while (i < curN && j < prevN)
+            {
+                if (cur[i] == prev[j])
+                {
+                    ++i;
+                    ++j;
+                }
+                else if (cur[i] < prev[j])
+                {
+                    emitBuffGained(cur[i], live, liveN);
+                    ++i;
+                }
+                else
+                {
+                    emitEvent(CUBE_EVENT_BUFF_LOST, 0, prev[j]);
+                    ++j;
+                }
+            }
+            for (; i < curN; ++i)
+                emitBuffGained(cur[i], live, liveN);
+            for (; j < prevN; ++j)
+                emitEvent(CUBE_EVENT_BUFF_LOST, 0, prev[j]);
+        }
+
+        // Diff the player's buffs, equipment and skill ranks against last frame, emitting
+        // BUFF_*/EQUIPMENT_CHANGED/SKILL_RANK_CHANGED.
+        bool anyWanted(std::initializer_list<CubeEvent> events)
+        {
+            for (const CubeEvent event : events)
+            {
+                if (modloader::events::hasSubscriber(event))
+                    return true;
+            }
+            return false;
+        }
+
+        // Each family below is skipped when nothing subscribes to what it emits, and clears its
+        // baseline flag when skipped so the next enabled frame re seeds silently instead of diffing
+        // against stale state and bursting.
+        void pollInventoryState()
+        {
+            if (!anyWanted({CUBE_EVENT_BUFF_GAINED, CUBE_EVENT_BUFF_LOST}))
+            {
+                g_prev.hadBuffs = false;
+            }
+            else
+            {
+                CubeBuff buffs[CUBE_BUFFS_MAX];
+                const int32_t buffCount = game::listBuffs(buffs, CUBE_BUFFS_MAX);
+                uint8_t types[CUBE_BUFFS_MAX];
+
+                for (int32_t i = 0; i < buffCount; ++i)
+                    types[i] = static_cast<uint8_t>(buffs[i].type);
+                std::sort(types, types + buffCount);
+
+                if (g_prev.hadBuffs)
+                    diffBuffTypes(types, buffCount, g_prev.buffTypes, g_prev.buffCount, buffs, buffCount);
+                std::copy(types, types + buffCount, g_prev.buffTypes);
+
+                g_prev.buffCount = buffCount;
+                g_prev.hadBuffs = true;
+            }
+
+            if (!modloader::events::hasSubscriber(CUBE_EVENT_EQUIPMENT_CHANGED))
+            {
+                g_prev.hadEquip = false;
+            }
+            else
+            {
+                CubeItem equip[CUBE_EQUIP_SLOTS];
+                const int32_t equipCount = game::listEquipment(equip, CUBE_EQUIP_SLOTS);
+                uint32_t sig[CUBE_EQUIP_SLOTS] = {};
+                int32_t slotType[CUBE_EQUIP_SLOTS] = {}; // the item type now in each slot (0 = empty)
+
+                for (int32_t i = 0; i < equipCount; ++i)
+                {
+                    const int32_t slot = equip[i].slot;
+                    if (slot >= 0 && slot < CUBE_EQUIP_SLOTS)
+                    {
+                        sig[slot] = itemSignature(equip[i]);
+                        slotType[slot] = equip[i].present ? equip[i].type : 0;
+                    }
+                }
+
+                if (g_prev.hadEquip)
+                {
+                    for (int32_t slot = 0; slot < CUBE_EQUIP_SLOTS; ++slot)
+                    {
+                        // param = slot, param2 = the item type now in that slot (0 = unequipped)
+                        if (sig[slot] != g_prev.equipSig[slot])
+                            emitEvent(CUBE_EVENT_EQUIPMENT_CHANGED, 0, slot, slotType[slot]);
+                    }
+                }
+
+                std::copy(sig, sig + CUBE_EQUIP_SLOTS, g_prev.equipSig);
+                g_prev.hadEquip = true;
+            }
+
+            if (!modloader::events::hasSubscriber(CUBE_EVENT_SKILL_RANK_CHANGED))
+            {
+                g_prev.hadSkills = false;
+                return;
+            }
+
+            int32_t ranks[CUBE_SKILL_COUNT];
+            const int32_t skillCount = game::listSkillRanks(ranks, CUBE_SKILL_COUNT);
+
+            if (g_prev.hadSkills)
+            {
+                for (int32_t i = 0; i < skillCount; ++i)
+                {
+                    if (ranks[i] != g_prev.skills[i])
+                        emitEvent(CUBE_EVENT_SKILL_RANK_CHANGED, 0, i, ranks[i]);
+                }
+            }
+
+            std::copy(ranks, ranks + skillCount, g_prev.skills);
+            g_prev.hadSkills = true;
+        }
+
+        // Diff the chat log's newest line signature; a change means a new line arrived. Reset when the
+        // widget is unresolved or empty, so re entering a world does not replay the last line as new and
+        // the first populated frame seeds the baseline without emitting.
+        void pollChat()
+        {
+            if (!modloader::events::hasSubscriber(CUBE_EVENT_CHAT_MESSAGE))
+            {
+                g_prev.hadChat = false;
+                return;
+            }
+
+            int32_t count = 0;
+            uint32_t sig = 0;
+            if (!game::chatProbe(count, sig) || count == 0)
+            {
+                g_prev.hadChat = false;
+                g_prev.chatSig = 0;
+                return;
+            }
+            if (g_prev.hadChat && sig != g_prev.chatSig)
+                emitEvent(CUBE_EVENT_CHAT_MESSAGE, 0, count);
+            g_prev.hadChat = true;
+            g_prev.chatSig = sig;
+        }
+
+        // The tree walk resolving the aim id to a creature address runs only on a change edge.
+        void pollAimTarget()
+        {
+            if (!modloader::events::hasSubscriber(CUBE_EVENT_AIM_TARGET_CHANGED))
+                return;
+
+            uintptr_t gc = 0;
+
+            if (!game::resolveGameController(gc))
+            {
+                g_prev.aimId = 0;
+                return;
+            }
+
+            uint64_t aimId = 0;
+
+            if (!mem::read(gc + off::kAimTargetIdOff, aimId) || aimId == g_prev.aimId)
+                return;
+            uint32_t subject = 0;
+            uintptr_t creature = 0;
+            if (aimId && game::findCreatureById(gc, aimId, creature))
+                subject = static_cast<uint32_t>(creature);
+            emitEvent(CUBE_EVENT_AIM_TARGET_CHANGED, subject, 0);
+            g_prev.aimId = aimId;
+        }
+
+        // Diff the companion id for COMPANION_SUMMONED/COMPANION_DISMISSED. Companion address is cached on
+        // the summon edge so PET_DIED matches the per frame CREATURE_DEATH edges without an extra tree walk.
+        void pollCompanionLifecycle(const CubePlayer& player, bool okPlayer)
+        {
+            if (!okPlayer || !player.address)
+            {
+                g_prev.companionId = 0;
+                g_prev.companionAddress = 0;
+                return;
+            }
+            uint64_t companionId = 0;
+            // A failed read must not zero companionId and falsely fire COMPANION_DISMISSED; leave prev state
+            // intact.
+            if (!mem::read(static_cast<uintptr_t>(player.address) + off::kCompanionIdOff, companionId))
+                return;
+            if (companionId == g_prev.companionId)
+                return;
+
+            if (g_prev.companionId != 0)
+            {
+                emitEvent(CUBE_EVENT_COMPANION_DISMISSED, g_prev.companionAddress, 0);
+            }
+            uint32_t companionAddress = 0;
+            if (companionId != 0)
+            {
+                uintptr_t gc = 0;
+                uintptr_t creature = 0;
+                if (game::resolveGameController(gc) && game::findCreatureById(gc, companionId, creature))
+                    companionAddress = static_cast<uint32_t>(creature);
+                emitEvent(CUBE_EVENT_COMPANION_SUMMONED, companionAddress, 0);
+            }
+            g_prev.companionAddress = companionAddress;
+            g_prev.companionId = companionId;
+        }
+
+        int32_t prevCooldownMs(int32_t abilityId)
+        {
+            for (int32_t i = 0; i < g_prev.cdCount; ++i)
+            {
+                if (g_prev.cdIds[i] == abilityId)
+                    return g_prev.cdMs[i];
+            }
+            return 0;
+        }
+
+        // Diff the ability cooldown map: an ability whose remaining ms goes from ready (absent/0) to a
+        // fresh positive value was just cast. The map key is the ability id (matches CUBE_CATALOG_ABILITY).
+        void pollAbilityUse(uint32_t playerAddress)
+        {
+            if (!modloader::events::hasSubscriber(CUBE_EVENT_ABILITY_USED))
+            {
+                g_prev.hadCooldowns = false;
+                return;
+            }
+
+            CubeAbilityCooldown cooldowns[CUBE_ABILITIES_MAX];
+            const int32_t count = game::listAbilityCooldowns(cooldowns, CUBE_ABILITIES_MAX);
+
+            if (g_prev.hadCooldowns)
+            {
+                for (int32_t i = 0; i < count; ++i)
+                {
+                    if (cooldowns[i].remainingMs > 0 && prevCooldownMs(cooldowns[i].abilityId) <= 0)
+                    {
+                        emitEvent(CUBE_EVENT_ABILITY_USED, playerAddress, cooldowns[i].abilityId,
+                                  cooldowns[i].remainingMs);
+                    }
+                }
+            }
+
+            g_prev.cdCount = count < CUBE_ABILITIES_MAX ? count : CUBE_ABILITIES_MAX;
+            for (int32_t i = 0; i < g_prev.cdCount; ++i)
+            {
+                g_prev.cdIds[i] = cooldowns[i].abilityId;
+                g_prev.cdMs[i] = cooldowns[i].remainingMs;
+            }
+            g_prev.hadCooldowns = true;
+        }
+
+        // Poll local player/world each frame and emit on edges (attack, jump, zone change).
+        // Fires nothing until the relevant offsets resolve (hasState/hasArea).
+        void pollGameEvents()
+        {
+            CubePlayer player = {};
+            player.structSize = sizeof(CubePlayer);
+            const bool okPlayer = game::readPlayer(player);
+
+            CubeWorld world = {};
+            world.structSize = sizeof(CubeWorld);
+            const bool okWorld = game::readWorld(world);
+
+            // World residency edge (title/menu and in world), distinct from AREA_CHANGE (zone to zone).
+            // Default false baseline is "not in world", so ENTER only fires on a real title to world cross
+            // and EXIT never fires spuriously on the first poll.
+            const bool nowInWorld = okPlayer && player.hasState;
+            if (nowInWorld != g_prev.inWorld)
+            {
+                if (nowInWorld)
+                    emitEvent(CUBE_EVENT_WORLD_ENTER, player.address, 0);
+                else
+                    emitEvent(CUBE_EVENT_WORLD_EXIT, 0, 0);
+                g_prev.inWorld = nowInWorld;
+            }
+
+            if (okPlayer && player.hasState)
+            {
+                // The +0x128 control lock is SHARED by hit stun and the dodge roll. game::actionlock
+                // (sampled in readPlayer) tells the two apart; hitStun carries the raw timer for the
+                // STUNNED payload. While rolling, the roll's upward pop and lock must not misfire as a
+                // jump / movement change / stun. It raises a single PLAYER_ROLL instead.
+                int32_t hitStun = 0;
+                mem::read(static_cast<uintptr_t>(player.address) + off::kPlayerHitStunOff, hitStun);
+                const game::actionlock::Cause lockCause = game::actionlock::cause();
+                const bool rolling = lockCause == game::actionlock::Cause::Rolling;
+                if (g_prev.valid)
+                {
+                    // PLAYER_ATTACK is a once per frame POLL edge: a rising edge into an attack/cast
+                    // action. KNOWN LIMIT: an attack that starts and ends inside one frame (a quick bow
+                    // shot, an instant ability) is missed, and a chained combo whose action byte never
+                    // returns to idle reads as ONE attack. There used to be a game thread sampler that
+                    // caught those, driven off a detour on the AI behavior tick at 0x42cb20; that detour
+                    // froze all friendly AI (measured), so it is gone and this is the honest fidelity.
+                    if (!isAttackAction(g_prev.action) && isAttackAction(player.action))
+                    {
+                        // param = action id, param2 = the selected target at the edge (0 if none)
+                        emitEvent(CUBE_EVENT_PLAYER_ATTACK, player.address, player.actionId,
+                                  static_cast<int32_t>(player.target));
+                    }
+                    if (isGroundedFamily(g_prev.movement) && isAirborneFamily(player.movement) && !rolling)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_JUMP, player.address, 0, 0, player.velZ);
+                    }
+                    if (isAirborneFamily(g_prev.movement) && isGroundedFamily(player.movement) && !rolling)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_LAND, player.address, 0, 0, player.velZ);
+                    }
+                    if (player.level > g_prev.level)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_LEVELUP, player.address, player.level, g_prev.level);
+                    }
+                    if (g_prev.alive && !player.alive)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_DEATH, player.address, 0);
+                    }
+                    if (!g_prev.alive && player.alive)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_RESPAWN, player.address, 0);
+                    }
+                    if (player.movement != g_prev.movement && !rolling)
+                    {
+                        emitEvent(CUBE_EVENT_MOVEMENT_CHANGED, player.address, player.movement,
+                                  g_prev.movement);
+                    }
+                    if (player.target != g_prev.target)
+                    {
+                        emitEvent(CUBE_EVENT_TARGET_CHANGED, player.target,
+                                  static_cast<int32_t>(g_prev.target));
+                    }
+                    if (player.coins != g_prev.coins)
+                    {
+                        emitEvent(CUBE_EVENT_COINS_CHANGED, 0, player.coins, player.coins - g_prev.coins);
+                    }
+                    // Emit on the classified lock cause transition: a fresh roll gives PLAYER_ROLL, a fresh
+                    // hit gives PLAYER_STUNNED, clearing a hit gives PLAYER_RECOVERED. A roll ending is
+                    // silent (Rolling back to None): the roll is one atomic event, not a stun/recover pair.
+                    if (lockCause != g_prev.lockCause)
+                    {
+                        // Close an open stun before any other cause so a mod pairing
+                        // STUNNED/RECOVERED can never be left stuck.
+                        if (g_prev.lockCause == game::actionlock::Cause::Stunned)
+                            emitEvent(CUBE_EVENT_PLAYER_RECOVERED, player.address, 0);
+
+                        switch (lockCause)
+                        {
+                            case game::actionlock::Cause::Rolling:
+                                emitEvent(CUBE_EVENT_PLAYER_ROLL, player.address, 0, 0, player.velZ);
+                                break;
+                            case game::actionlock::Cause::Stunned:
+                                emitEvent(CUBE_EVENT_PLAYER_STUNNED, player.address, hitStun);
+                                break;
+                            case game::actionlock::Cause::None:
+                                break;
+                        }
+                    }
+                    if (!g_prev.knockedDown && player.knockedDown)
+                    {
+                        emitEvent(CUBE_EVENT_PLAYER_KNOCKED_DOWN, player.address, 0);
+                    }
+                }
+
+                // Calibration trace: log every action id change (with the loader's attack/movement
+                // classification) so a live test run confirms which ids each weapon actually uses.
+                if (player.actionId != g_prev.lastActionId)
+                {
+                    LOGC(Debug, kActionCategory, "action %d -> %d (resolved=%d elapsed=%dms)",
+                         g_prev.lastActionId, player.actionId, player.action, player.actionElapsedMs);
+                    g_prev.lastActionId = player.actionId;
+                }
+
+                g_prev.action = player.action;
+                g_prev.level = player.level;
+                g_prev.alive = player.alive;
+                g_prev.movement = player.movement;
+                g_prev.target = player.target;
+                g_prev.coins = player.coins;
+                g_prev.lockCause = lockCause;
+                g_prev.knockedDown = player.knockedDown;
+                g_prev.valid = true;
+                pollInventoryState();
+                pollAimTarget();
+                pollAbilityUse(player.address);
+                pollChat();
+            }
+            else
+            {
+                // Player gone (title/menu); do not diff across the gap.
+                g_prev.valid = false;
+                g_prev.hadBuffs = false;
+                g_prev.hadEquip = false;
+                g_prev.hadSkills = false;
+                g_prev.hadCooldowns = false;
+                g_prev.aimId = 0;
+                g_prev.hadChat = false;
+                g_prev.chatSig = 0;
+            }
+
+            // A single frame can spawn and despawn a full zone (mass reload) and also damage every
+            // creature (mass AoE), so the edge buffer holds several edges per creature. Overflow is
+            // guarded (extra edges are dropped, never a crash).
+            constexpr int32_t kMaxCreatureEdges = CUBE_CREATURES_MAX * 3;
+            game::CreatureEdge entityEdges[kMaxCreatureEdges];
+            int32_t entityEdgeCount = 0;
+            // The creature map walk is the dominant per frame cost. Passing playerValid=false is
+            // pollCombat's own baseline reset path, so skipping it cannot leave stale tracked state.
+            const bool wantCombat = anyWanted(
+                {CUBE_EVENT_PLAYER_DAMAGED, CUBE_EVENT_PLAYER_CRIT, CUBE_EVENT_CREATURE_DAMAGED,
+                 CUBE_EVENT_CREATURE_SPAWN, CUBE_EVENT_CREATURE_DEATH, CUBE_EVENT_CREATURE_DESPAWN,
+                 CUBE_EVENT_CREATURE_STUNNED, CUBE_EVENT_CREATURE_RECOVERED, CUBE_EVENT_CREATURE_KNOCKED_DOWN,
+                 CUBE_EVENT_COMPANION_DIED, CUBE_EVENT_COMPANION_STUNNED, CUBE_EVENT_COMPANION_RECOVERED,
+                 CUBE_EVENT_COMPANION_KNOCKED_DOWN});
+            const game::CombatEdges combat = game::pollCombat(player, okPlayer && wantCombat, entityEdges,
+                                                              kMaxCreatureEdges, entityEdgeCount);
+            if (combat.damageTaken > 0.0f)
+            {
+                const int32_t damage = static_cast<int32_t>(combat.damageTaken);
+                emitEvent(CUBE_EVENT_PLAYER_DAMAGED, player.address, damage,
+                          static_cast<int32_t>(player.health), combat.damageTaken);
+            }
+            if (combat.crit)
+            {
+                emitEvent(CUBE_EVENT_PLAYER_CRIT, 0, 0);
+            }
+            for (int32_t i = 0; i < entityEdgeCount; ++i)
+            {
+                const game::CreatureEdge& edge = entityEdges[i];
+                const bool isCompanion =
+                    g_prev.companionAddress != 0 && edge.address == g_prev.companionAddress;
+                switch (edge.kind)
+                {
+                    case game::CreatureEdgeKind::Damaged:
+                        // ANY creature took damage (attacker not attributed). subject = victim,
+                        // param = victim category, param2 = remaining health, amount = damage.
+                        emitEvent(CUBE_EVENT_CREATURE_DAMAGED, edge.address, edge.category,
+                                  static_cast<int32_t>(edge.health), edge.damage);
+                        break;
+                    case game::CreatureEdgeKind::Spawn:
+                        emitEvent(CUBE_EVENT_CREATURE_SPAWN, edge.address, edge.category, edge.type,
+                                  edge.health);
+                        break;
+                    case game::CreatureEdgeKind::Death:
+                        emitEvent(CUBE_EVENT_CREATURE_DEATH, edge.address, edge.category, edge.type);
+                        if (isCompanion)
+                            emitEvent(CUBE_EVENT_COMPANION_DIED, edge.address, edge.category, edge.type);
+                        break;
+                    case game::CreatureEdgeKind::Despawn:
+                        emitEvent(CUBE_EVENT_CREATURE_DESPAWN, edge.address, edge.category, edge.type);
+                        break;
+                    case game::CreatureEdgeKind::Stunned:
+                        emitEvent(CUBE_EVENT_CREATURE_STUNNED, edge.address, edge.category, edge.type);
+                        if (isCompanion)
+                            emitEvent(CUBE_EVENT_COMPANION_STUNNED, edge.address, edge.category, edge.type);
+                        break;
+                    case game::CreatureEdgeKind::Recovered:
+                        emitEvent(CUBE_EVENT_CREATURE_RECOVERED, edge.address, edge.category, edge.type);
+                        if (isCompanion)
+                            emitEvent(CUBE_EVENT_COMPANION_RECOVERED, edge.address, edge.category, edge.type);
+                        break;
+                    case game::CreatureEdgeKind::KnockedDown:
+                        emitEvent(CUBE_EVENT_CREATURE_KNOCKED_DOWN, edge.address, edge.category, edge.type);
+                        if (isCompanion)
+                            emitEvent(CUBE_EVENT_COMPANION_KNOCKED_DOWN, edge.address, edge.category,
+                                      edge.type);
+                        break;
+                }
+            }
+            pollCompanionLifecycle(player, okPlayer);
+
+            CubeUi ui = {};
+            ui.structSize = sizeof(CubeUi);
+            if (game::readUi(ui))
+            {
+                const bool open = ui.anyOpen != 0;
+                if (open != g_prev.menuOpen)
+                {
+                    // param = a bitmask of which tracked HUD panels are open (see CubeUiMenuMask).
+                    const int32_t mask = (ui.inventoryOpen ? CUBE_MENU_INVENTORY : 0) |
+                                         (ui.characterOpen ? CUBE_MENU_CHARACTER : 0) |
+                                         (ui.mapOpen ? CUBE_MENU_MAP : 0) |
+                                         (ui.objectiveOpen ? CUBE_MENU_OBJECTIVE : 0);
+                    emitEvent(open ? CUBE_EVENT_MENU_OPEN : CUBE_EVENT_MENU_CLOSE, 0, mask);
+                    g_prev.menuOpen = open;
+                }
+            }
+
+            if (okWorld && world.hasArea)
+            {
+                if (g_prev.hadArea && (g_prev.zoneX != world.zoneX || g_prev.zoneY != world.zoneY))
+                {
+                    emitEvent(CUBE_EVENT_AREA_CHANGE, 0, world.zoneX, world.zoneY);
+                }
+                g_prev.zoneX = world.zoneX;
+                g_prev.zoneY = world.zoneY;
+                g_prev.hadArea = true;
+            }
+            else
+            {
+                g_prev.hadArea = false;
+            }
+
+            if (okWorld && world.hasTime)
+            {
+                if (g_prev.hadTime && world.isDay != g_prev.isDay)
+                {
+                    emitEvent(CUBE_EVENT_DAY_NIGHT, 0, world.isDay, world.hour);
+                }
+                g_prev.isDay = world.isDay;
+                g_prev.hadTime = true;
+            }
+            else
+                g_prev.hadTime = false;
+
+            // Select detour captured a new R/use key selection: emit it on the render thread
+            // (subject = creature/object, param = CubeSelectionKind).
+            CubeSelection selection = {};
+            selection.structSize = sizeof(CubeSelection);
+            if (game::selection::pollSelection(selection))
+            {
+                emitEvent(CUBE_EVENT_CREATURE_SELECTED, selection.address, selection.kind,
+                          selection.typeByte);
+            }
+
+            // Pickup detour captured a new E key item pickup: emit it on the render thread
+            // (subject = item type, param = subtype, param2 = stack count).
+            CubeItem pickup = {};
+            pickup.structSize = sizeof(CubeItem);
+            if (game::pickup::pollPickup(pickup))
+            {
+                emitEvent(CUBE_EVENT_ITEM_PICKUP, static_cast<uint32_t>(pickup.type), pickup.subtype,
+                          pickup.stack);
+            }
+
+            // Emits the full offset resolution report the first frame a world loads.
+            game::diag::pollResolutionReport();
+            // Warns if any held/equipped/stored item is corrupt (throttled + de duplicated).
+            game::diag::pollItemCorruption();
+        }
+    }
+
+    void emitLifecycle(CubeEvent event)
+    {
+        emitEvent(event, 0, 0);
+    }
+
+    uint32_t currentFrame()
+    {
+        return g_frameIndex;
+    }
+
+    void CUBE_CALL onFrame(IDirect3DDevice9* device)
+    {
+        // Open the intra frame resolve cache so the many player/GC/creature resolves below walk the
+        // pointer chains only once.
+        game::framecache::beginFrame();
+
+        CubeEventArgs args = {};
+        args.structSize = sizeof(CubeEventArgs);
+        args.event = CUBE_EVENT_FRAME;
+        args.device = device;
+        args.hwnd = hooks::d3d9::window();
+        args.frameIndex = g_frameIndex++;
+        modloader::events::emit(args);
+
+        pollGameEvents();
+    }
+
+    void CUBE_CALL onDeviceReset(bool preReset)
+    {
+        CubeEventArgs args = {};
+        args.structSize = sizeof(CubeEventArgs);
+        args.event = CUBE_EVENT_DEVICE_RESET;
+        args.preReset = preReset ? 1 : 0;
+        modloader::events::emit(args);
+    }
+
+    bool CUBE_CALL onWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+    {
+        CubeEventArgs args = {};
+        args.structSize = sizeof(CubeEventArgs);
+        args.event = CUBE_EVENT_WNDPROC;
+        args.hwnd = hwnd;
+        args.msg = msg;
+        args.wParam = static_cast<uint32_t>(wParam);
+        args.lParam = static_cast<int32_t>(lParam);
+        return modloader::events::emit(args) != 0;
+    }
+}

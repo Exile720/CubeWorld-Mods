@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "created": "2026-10-23T16:15:45.4009703+08:00",
+  "stage": "experimental copy installed; in-game test pending",
+  "potionShopSha256": "C6D08BAD9CACA91901B70B1A70521E5229F89072C0629087B6810E75A8998F18",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "scope": {
+    "higherTiers": "unchanged",
+    "priceCopper": 10,
+    "resale": "native unchanged",
+    "mode": "single player",
+    "item": "native basic LifePotion raw level 1",
+    "shop": "Item Shop role 0x80"
+  },
+  "checks": {
+    "build": "Win32 Release success",
+    "inGame": "pending",
+    "offline": "Potion stock checks: 115 passed, 0 failed (115 total).",
+    "binary": "x86; CubeMod_Init and CubeMod_Shutdown; KERNEL32 only",
+    "saveBackupQuickCheck": {
+      "characters.db": "ok",
+      "map_3DM.db": "ok",
+      "worlds.db": "ok",
+      "world_3DM.db": "ok"
+    }
+  },
+  "upstream": {
+    "reversal": "e6e906e4b2644806ef19c2e1f12ebc636c347f7c",
+    "qube": "4c3dad5a4665ffcc40117aef7fe6da6fdea61ca9"
+  }
+}

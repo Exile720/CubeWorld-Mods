@@ -1,0 +1,9 @@
+{
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "version": "0.1.4",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "fastTravelSha256": "FEE200E6C2B6D2794ED59C292224CF2F7D37E7652EE309168BB4D3BE6B6A37C6",
+  "managerRebuildRequired": false,
+  "gameplayVerified": false,
+  "fontChange": "Original FZCuYuan face retained; pixel-aligned text and normal ink density. No gameplay or data format change."
+}

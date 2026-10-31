@@ -1,0 +1,13 @@
+{
+  "version": "0.3.1",
+  "scope": "native map shop marker entities only; furniture and workstations excluded; CW_TOWN_2 invalidates prior erroneous cache",
+  "waypointSha256": "EDCEBB90553E16B83CF29328700C414275A771774DA7B5166F08C1029B94039F",
+  "stage": "installed in Experiment; five native shop labels visually verified",
+  "checks": {
+    "navigation": 51,
+    "town": 31
+  },
+  "created": "2026-10-23T11:14:19.2161644+08:00",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31"
+}

@@ -1,0 +1,17 @@
+﻿{
+  "version": "0.3.5",
+  "created": "2026-10-24T12:52:06.8874076+08:00",
+  "stage": "experimental copy installed; in-game validation pending",
+  "waypointSha256": "416A64B9BC3A4B3ADC8FD23E04890C38B7AE310CC8F7C85050A8863F0D23AADA",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "scope": "native fixed shop spawn coordinates; reconcile nearby legacy moving shop records",
+  "checks": {
+    "build": "Win32 Release success",
+    "town": "44 PASS",
+    "modManagement": "41 PASS offline fixtures",
+    "modManagerState": "82 PASS offline fixtures",
+    "installer": "19 PASS in PowerShell 7.6.5 and Windows PowerShell 5.1",
+    "inGame": "pending; no live fixed-home shop captured"
+  }
+}

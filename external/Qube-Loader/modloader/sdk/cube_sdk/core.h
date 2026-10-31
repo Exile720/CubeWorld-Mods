@@ -1,0 +1,52 @@
+#pragma once
+// ABI preamble: version, size limits, and calling convention/export macros.
+
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+#define CUBE_ABI_VERSION 29
+// Oldest mod ABI this loader still accepts. Held FIXED as CUBE_ABI_VERSION grows (growth is
+// additive only), so a mod built against any ABI in [CUBE_MIN_ABI_VERSION, CUBE_ABI_VERSION] keeps
+// loading. Raised to 25 because that revision removed struct fields and renumbered enums, so older
+// mods are genuinely layout incompatible; only a non additive break should move it again.
+// NOTE for 27: no layout changed and every existing enum VALUE held, so the floor stays at 25. What
+// did change is CUBE_HOOK_IMPACT's meaning: it now detours the real melee hit resolver instead of the
+// AI behavior tick, so self/target are victim/attacker and the damage amount moved from argi[0] to
+// argf[0]. An ABI <= 26 mod still loads, but its IMPACT handler reads slots the loader no longer
+// fills. It was reading a mistargeted hook before, so nothing regressed.
+// NOTE for 28: pure additive growth (CubeChatApi appended to CubeApi, CubeChatMessage/CubeChatInput
+// PODs, CUBE_EVENT_CHAT_MESSAGE appended before CUBE_EVENT_COUNT). No layout or enum value changed,
+// so the floor stays at 25.
+// NOTE for 29: pure additive growth (CubeAppearanceApi appended to CubeApi, CubeAppearance POD). No
+// layout or enum value changed, so the floor stays at 25.
+#define CUBE_MIN_ABI_VERSION 25
+#define CUBE_LOG_BUFFER 1024
+#define CUBE_CONFIG_STRING_MAX 256
+// Locale strings can be full sentences, so this is larger than the config value cap.
+#define CUBE_LOCALE_STRING_MAX 512
+#define CUBE_HOOK_ARG_MAX 4
+#define CUBE_PLAYER_NAME_MAX 64
+#define CUBE_CLASS_NAME_MAX 16
+#define CUBE_AREA_NAME_MAX 64
+#define CUBE_CREATURES_MAX 512
+#define CUBE_ITEM_NAME_MAX 24
+#define CUBE_EQUIP_SLOTS 12
+#define CUBE_INVENTORY_MAX 128
+#define CUBE_SKILL_COUNT 11
+#define CUBE_STRUCTURES_MAX 64
+#define CUBE_BUFFS_MAX 32
+#define CUBE_ABILITIES_MAX 32
+#define CUBE_CATALOG_MAX 192
+#define CUBE_CHAT_TEXT_MAX 256
+#define CUBE_CHAT_MESSAGES_MAX 10
+
+#define CUBE_CALL __cdecl
+
+#ifdef __cplusplus
+    #define CUBE_EXTERN_C extern "C"
+#else
+    #define CUBE_EXTERN_C
+#endif
+
+#define CUBE_MOD_API CUBE_EXTERN_C __declspec(dllexport)

@@ -1,0 +1,17 @@
+{
+  "version": "0.1.3",
+  "id": "local.cubeworld.inventory_sort",
+  "managerId": "InventorySort",
+  "built": "2026-10-25T10:15:44.7880517+08:00",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "inventorySortSha256": "AE38FA8B730AF97EF9B135275F0B8E12BAC793057D615EF0AE1022EDB99943CA",
+  "nativeInventoryUnchanged": true,
+  "categorySections": true,
+  "adaptiveRows": true,
+  "chineseHeadings": true,
+  "gameLaunched": false,
+  "nativeGridGeometry": true,
+  "showSlotCounts": false,
+  "nativeDetailsPriority": true
+}

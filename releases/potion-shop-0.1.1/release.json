@@ -1,0 +1,18 @@
+{
+  "version": "0.1.1",
+  "created": "2026-10-23T16:29:35.1569858+08:00",
+  "stage": "experimental copy installed; in-game retest pending",
+  "potionShopSha256": "8C1875289C33908BD0E62312ED4C0420D743A10B55140B426CF6696325F404BB",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "priceCopper": 10,
+  "declaredCapabilities": 7,
+  "fix": "declare Writes so loader accepts stock args and price return changes",
+  "checks": {
+    "moduleIntegration": "24 checks, 0 failures; actual DLL with synthetic SDK and actual ownerMayWrite policy",
+    "build": "Win32 Release success",
+    "inGame": "pending",
+    "stockAndPricing": "115 passed",
+    "legacyRegression": "0.1.0 fails manifest, ownerMayWrite and effective stock source rewrite as expected"
+  }
+}

@@ -1,0 +1,129 @@
+#pragma once
+// Local player accessor: Player. (Combat lives in combat.hpp, Stun in status.hpp.)
+
+#include "cube/common.hpp"
+#include "cube/status.hpp" // Stun, returned by Player::getStun()
+
+namespace cube
+{
+    // The local player. Snapshots loader data on construction; getters read the snapshot.
+    class Player
+    {
+    public:
+        explicit Player(const CubeApi* api) : m_api(api), m_valid(api && api->player.get(api, &m_data) != 0)
+        {
+        }
+
+        bool valid() const { return m_valid; }
+        // Re pull the snapshot from live memory; call after a setter, else a get reads the pre set value.
+        bool refresh()
+        {
+            m_valid = m_api && m_api->player.get(m_api, &m_data) != 0;
+            return m_valid;
+        }
+        bool isAlive() const { return m_data.alive != 0; }
+        float getHealth() const { return m_data.health; }
+        int getLevel() const { return m_data.level; }
+        unsigned getXp() const { return m_data.xp; }
+        Class getClass() const { return static_cast<Class>(m_data.classForm); }
+        const char* getClassName() const { return m_data.className; }
+        int getSpec() const { return m_data.spec; }
+        int getType() const { return m_data.type; }
+        const char* getName() const { return m_data.hasName ? m_data.name : ""; }
+        bool hasName() const { return m_data.hasName != 0; }
+        Vec3 getPosition() const { return Vec3{m_data.x, m_data.y, m_data.z}; }
+        bool hasPosition() const { return m_data.hasPosition != 0; }
+        float getMana() const { return m_data.mana; }
+        float getManaPercent() const { return m_data.manaPercent; }
+        float getStamina() const { return m_data.stamina; }
+        float getStaminaPercent() const { return m_data.staminaPercent; }
+        int getCoins() const { return m_data.coins; }
+        float getFacing() const { return m_data.facing; }
+        Vec3 getVelocity() const { return Vec3{m_data.velX, m_data.velY, m_data.velZ}; }
+        float getSpeed() const { return m_data.speed; }
+        // Consolidated state (resolved by the loader). Prefer these over the booleans.
+        Movement getMovement() const { return static_cast<Movement>(m_data.movement); }
+        Action getAction() const { return static_cast<Action>(m_data.action); }
+        const char* getMovementText() const { return movementName(getMovement()); }
+        const char* getActionText() const { return actionName(getAction()); }
+        // Thin wrappers over the consolidated state (no recompute).
+        bool isOnGround() const
+        {
+            return getMovement() == Movement::Grounded || getMovement() == Movement::Sneaking;
+        }
+        bool isClimbing() const { return getMovement() == Movement::Climbing; }
+        bool isSwimming() const { return getMovement() == Movement::Swimming; }
+        bool isAttacking() const { return getAction() == Action::Attacking; }
+        bool isSneaking() const { return m_data.sneaking != 0; }
+        // Stealth stat 0..1 (reduces enemy detection; shares the field that feeds crit chance).
+        float getStealth() const { return m_data.stealth; }
+        // Held lantern / light render flag.
+        bool hasLantern() const { return m_data.lantern != 0; }
+        // ms elapsed in the current action. To catch the attack edge itself, use eventListener().onAttack.
+        int getActionElapsedMs() const { return m_data.actionElapsedMs; }
+        bool isCasting() const { return getAction() == Action::Casting; }
+        bool isKnockedDown() const { return m_data.knockedDown != 0; }
+        // Consolidated stun snapshot (timer + downed + knockback), plus a one call break free.
+        Stun getStun() const { return Stun(m_api, 0); } // 0 = the local player
+        bool clearStun() const { return m_api && m_api->status.clearStun(m_api, 0) != 0; }
+        int getActionId() const { return m_data.actionId; }
+        bool hasState() const { return m_data.hasState != 0; }
+        const CubePlayer& raw() const { return m_data; }
+
+        // Mutators write live memory (guarded), not this frozen snapshot; call refresh() to see the change
+        // here.
+        bool setHealth(float health) const { return set(PlayerStat::Health, health); }
+        bool setMana(float mana) const { return set(PlayerStat::Mana, mana); }
+        bool setStamina(float stamina) const { return set(PlayerStat::Stamina, stamina); }
+        bool setCoins(int coins) const { return set(PlayerStat::Coins, coins); }
+        bool setLevel(int level) const { return set(PlayerStat::Level, level); }
+        bool giveXp(int amount) const { return m_api && m_api->player.addXp(m_api, amount) != 0; }
+        bool teleport(float x, float y, float z) const
+        {
+            return m_api && m_api->player.teleport(m_api, x, y, z) != 0;
+        }
+        bool teleport(const Vec3& to) const { return teleport(to.x, to.y, to.z); }
+        // Generic scalar setter plus typed conveniences for every editable stat.
+        bool set(PlayerStat stat, double value) const
+        {
+            return m_api && m_api->player.setStat(m_api, static_cast<int32_t>(stat), value) != 0;
+        }
+        bool setClass(Class value) const
+        {
+            return set(PlayerStat::Class, static_cast<double>(static_cast<int>(value)));
+        }
+        bool setSpec(int spec) const { return set(PlayerStat::Spec, spec); }
+        bool setType(int type) const { return set(PlayerStat::Type, type); }
+        bool setFacing(float radians) const { return set(PlayerStat::Facing, radians); }
+        bool setPower(float power) const { return set(PlayerStat::Power, power); }
+        bool setArmor(float armor) const { return set(PlayerStat::Armor, armor); }
+        bool setSpirit(float spirit) const { return set(PlayerStat::Spirit, spirit); }
+        bool setCombo(int combo) const { return set(PlayerStat::Combo, combo); }
+        bool setAttackCooldown(float cooldown) const { return set(PlayerStat::AttackCooldown, cooldown); }
+        bool setHitStun(int hitStun) const { return set(PlayerStat::HitStun, hitStun); }
+        bool setVelocity(float x, float y, float z) const
+        {
+            return set(PlayerStat::VelX, x) && set(PlayerStat::VelY, y) && set(PlayerStat::VelZ, z);
+        }
+        bool setVelocity(const Vec3& v) const { return setVelocity(v.x, v.y, v.z); }
+        bool setActionId(int actionId) const { return set(PlayerStat::ActionId, actionId); }
+        bool setSneaking(bool sneaking) const { return set(PlayerStat::Sneaking, sneaking ? 1 : 0); }
+        // Set the stealth level 0..1; the same stat feeds crit chance, so raising it also raises crit.
+        bool setStealth(float stealth) const { return set(PlayerStat::Stealth, stealth); }
+        // Turn the held lantern/light on or off.
+        bool setLantern(bool on) const { return set(PlayerStat::Lantern, on ? 1 : 0); }
+        bool setAttackSpeed(float attackSpeed) const { return set(PlayerStat::AttackSpeed, attackSpeed); }
+        bool setBaseDamage(float damage) const { return set(PlayerStat::BaseDamage, damage); }
+        bool setName(const char* name) const { return m_api && m_api->player.setName(m_api, name) != 0; }
+        bool setSkillRank(int index, int value) const
+        {
+            return m_api && m_api->skills.setRank(m_api, index, value) != 0;
+        }
+
+    private:
+        const CubeApi* m_api;
+        CubePlayer m_data = {};
+        bool m_valid;
+    };
+
+}

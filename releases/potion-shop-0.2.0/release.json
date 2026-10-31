@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "created": "2026-10-24T13:40:41.2910366+08:00",
+  "stage": "experimental copy installed; in-game acceptance pending",
+  "potionShopSha256": "7348BBD32BFAC534BC24B67E78ABDC52DAA25514523BB732D3A26B2222B044EC",
+  "gameSha256": "84A7A132A84D4282338E7EA45A1940D32066D64E39CBAFED8F2418D5A6DC30BF",
+  "requiresFrameworkSha256": "D729D26FF4F91EED453160FBE4D24D9430043AE6A7165CF3A3AF8A92C24B7A31",
+  "declaredCapabilities": 7,
+  "offerRule": "current characters highest unlocked ordinary LifePotion recipe, minus 4 levels; no offer below tier 5",
+  "priceRule": "ceil(10 + (nativeHealing - 200) / 40) copper",
+  "examples": [
+    {
+      "copper": 15,
+      "craft": 13,
+      "shop": 9
+    },
+    {
+      "copper": 16,
+      "craft": 17,
+      "shop": 13
+    },
+    {
+      "copper": 33,
+      "craft": 101,
+      "shop": 97
+    }
+  ],
+  "checks": {
+    "inGame": "pending",
+    "moduleIntegration": "55 actual DLL / synthetic SDK checks passed",
+    "stockAndProgression": "184 checks passed",
+    "installer": "23 isolated installation checks passed on PowerShell 7 and Windows PowerShell 5.1",
+    "build": "Win32 Release passed",
+    "manager": "82 state and 41 management checks passed; manager rebuilt"
+  }
+}
